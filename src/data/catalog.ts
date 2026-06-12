@@ -2,6 +2,20 @@ import type { Vehiculo } from '../types';
 
 // Precise pre-configured, user-tested vehicles to ensure compatibility with PDFs and existing quote flows
 const STATIC_VEHICLES: Vehiculo[] = [
+  // Honda Civic 2017 (To match official HDI Policy PDF)
+  {
+    id: 'honda-civic-2017',
+    marca: 'Honda',
+    modelo: 'Civic',
+    anio: 2017,
+    version: 'EX L4 2.0L 158 CP 4 Puertas Std BA AA',
+    descripcionCompleta: 'HONDA CIVIC EX L4 2.0L 158 CP 4 PUERTAS STD BA AA 2017',
+    claveAmis: 'SEDHO004008-2017',
+    armadoraGnp: 'HO',
+    carroceriaGnp: '01',
+    versionGnp: '02',
+    valorReferencia: 226000,
+  },
   // Kia Sportage 2018 (To match official user PDFs)
   {
     id: 'kia-sportage-2018',
