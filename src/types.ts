@@ -52,6 +52,8 @@ export interface CoberturasPersonalizadasCliente {
   llavesYControles?: boolean;
   esteticaAutomotriz?: boolean;
   equipoEspecial?: boolean;
+  valorVehiculoPersonalizado?: number;
+  descuento?: number;
 }
 
 export interface ResultadoAseguradora {

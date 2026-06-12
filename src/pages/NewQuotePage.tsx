@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../lib/auth';
-import type { Cliente, Vehiculo, Cotizacion } from '../types';
+import type { Cliente, Vehiculo, Cotizacion, ResultadoAseguradora, CoberturaDetalle } from '../types';
 import { getSavedInsurers, calculateSimulatedQuote, logWSCall } from '../data/insurers';
 import VehicleSelector from '../components/VehicleSelector';
 import { 
@@ -62,13 +62,13 @@ export default function NewQuotePage({ onQuoteCompleted, onCancel }: NewQuotePag
 
   const handleNextStep = () => {
     if (step === 1) {
-      if (!cliente.nombre || !cliente.rfc || !cliente.telefono || !cliente.correo || !cliente.codigoPostal || !cliente.edad || !cliente.genero) {
+      if (!cliente.nombre || !cliente.codigoPostal || !cliente.edad || !cliente.genero) {
         setFormError('Por favor complete todos los campos obligatorios del cliente.');
         return;
       }
       
       // Basic email and CP validation
-      if (!cliente.correo.includes('@')) {
+      if (cliente.correo && !cliente.correo.includes('@')) {
         setFormError('Por favor ingrese un correo válido.');
         return;
       }
@@ -90,7 +90,7 @@ export default function NewQuotePage({ onQuoteCompleted, onCancel }: NewQuotePag
   };
 
   // Launch comparative quotes directly (defaults: Amplia, Anual)
-  const handleCalculateQuotes = () => {
+  const handleCalculateQuotes = async () => {
     if (!selectedVehiculo) {
       setFormError('Por favor seleccione una versión de vehículo del catálogo para cotizar.');
       return;
@@ -98,45 +98,95 @@ export default function NewQuotePage({ onQuoteCompleted, onCancel }: NewQuotePag
 
     setLoading(true);
     setFormError('');
+    setLoadingStep('Conectando con pasarela central de cotización...');
 
-    // Phase loading visual status tracker simulates back-end SOAP connections
-    const sequence = [
-      { msg: 'Conectando con Servidor Quálitas SOAP...', duration: 600 },
-      { msg: 'Estableciendo XML GNP Preferente WSP...', duration: 700 },
-      { msg: 'Consultando tarifas Seguros El Potosí...', duration: 550 },
-      { msg: 'Homologando versión ANA Seguros Transaccion...', duration: 650 },
-      { msg: 'Generando pólizas de comparación...', duration: 400 }
-    ];
-
-    let currentIndex = 0;
-    
-    const runSequence = () => {
-      if (currentIndex < sequence.length) {
-        setLoadingStep(sequence[currentIndex].msg);
-        setTimeout(() => {
-          currentIndex++;
-          runSequence();
-        }, sequence[currentIndex - 1]?.duration || 500);
-      } else {
-        finalizeQuoting();
-      }
-    };
-
-    setLoadingStep(sequence[0].msg);
-    setTimeout(() => {
-      currentIndex = 1;
-      runSequence();
-    }, 600);
-  };
-
-  const finalizeQuoting = () => {
     try {
-      if (!selectedVehiculo) return;
-
       const insurers = getSavedInsurers();
       
-      // Calculate quotes for active insurers with default "Amplia" and "Anual" params
-      const results = insurers.map(ins => {
+      const promises = insurers.map(async (ins): Promise<ResultadoAseguradora> => {
+        setLoadingStep(`Consultando Web Service oficial de ${ins.nombre}...`);
+        
+        try {
+          const response = await fetch('/api/quote', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              insurer: ins,
+              vehiculo: selectedVehiculo,
+              cliente,
+              paquete: 'Amplia',
+              formaPago: 'Anual',
+              customConfigs: {}
+            })
+          });
+
+          if (response.ok) {
+            const apiRes = await response.json();
+            
+            // If the real remote SOAP query worked, we populate results perfectly
+            if (apiRes.status === 'exitoso') {
+              // Log the real WS communication XMLs to the technical log terminal!
+              logWSCall({
+                aseguradora: ins.nombre,
+                endpoint: ins.slug === 'qualitas' ? ins.credenciales.QUALITAS_WS_URL : ins.slug === 'ana-seguros' ? ins.credenciales.ANA_WS_URL : 'HTTPS://api.service.com',
+                status: 200,
+                tipo: 'Cotizacion',
+                requestBody: apiRes.requestXmlPayload || '--- Request XML ---',
+                responseBody: apiRes.responseXmlPayload || '--- Response XML ---',
+                correcto: true,
+              });
+
+              // Generate coverage table conforming to the real API rate
+              const generatedCoverages: CoberturaDetalle[] = ins.slug === 'qualitas' ? [
+                { nombre: 'Daños Materiales Terrestres', sumaAsegurada: 'Valor Comercial', deducible: '5%', tipo: 'deducible' },
+                { nombre: 'Robo Total', sumaAsegurada: 'Valor Comercial', deducible: '10%', tipo: 'deducible' },
+                { nombre: 'Responsabilidad Civil por Daños a Terceros', sumaAsegurada: '$3,000,000 MXN', deducible: 'Sin deducible', tipo: 'limite' },
+                { nombre: 'Gastos Médicos a Ocupantes', sumaAsegurada: '$250,000 MXN', deducible: 'Sin deducible', tipo: 'limite' },
+                { nombre: 'Asistencia Vial y Viaje', sumaAsegurada: 'Amparada', deducible: 'Sin deducible', tipo: 'amparada' },
+                { nombre: 'Defensa Jurídica y Legal', sumaAsegurada: 'Amparada', deducible: 'Sin deducible', tipo: 'amparada' },
+              ] : [
+                { nombre: 'Daños Materiales Terrestres', sumaAsegurada: 'Valor Comercial', deducible: '5%', tipo: 'deducible' },
+                { nombre: 'Robo Total', sumaAsegurada: 'Valor Comercial', deducible: '10%', tipo: 'deducible' },
+                { nombre: 'Responsabilidad Civil', sumaAsegurada: '$3,000,000 MXN', deducible: 'Sin deducible', tipo: 'limite' },
+                { nombre: 'Gastos Médicos Clientes', sumaAsegurada: '$250,000 MXN', deducible: 'Sin deducible', tipo: 'limite' },
+                { nombre: 'Asistencia Vial VialPlus', sumaAsegurada: 'Amparada', deducible: 'Sin deducible', tipo: 'amparada' },
+                { nombre: 'Defensa Legal Completa', sumaAsegurada: 'Amparada', deducible: 'Sin deducible', tipo: 'amparada' },
+              ];
+
+              return {
+                id: ins.id,
+                aseguradoraId: ins.id,
+                aseguradoraNombre: ins.nombre,
+                logo: ins.logo,
+                paquete: 'Amplia',
+                formaPago: 'Anual',
+                status: 'exitoso',
+                coberturas: generatedCoverages,
+                derechoPoliza: apiRes.derechoPoliza,
+                iva: apiRes.iva,
+                primaNeta: apiRes.primaNeta,
+                primaTotal: apiRes.primaTotal,
+                sumaAseguradaVehiculo: selectedVehiculo.valorEstimado || 250000,
+              };
+            } else {
+              // Create log entry for SOAP rejected parameters
+              logWSCall({
+                aseguradora: ins.nombre,
+                endpoint: ins.slug === 'qualitas' ? ins.credenciales.QUALITAS_WS_URL || '' : ins.slug === 'ana-seguros' ? ins.credenciales.ANA_WS_URL || '' : 'HTTPS://api.service.com',
+                status: 400,
+                tipo: 'Cotizacion',
+                requestBody: apiRes.requestXmlPayload || '--- Request ---',
+                responseBody: apiRes.responseXmlPayload || apiRes.errorMsg || '--- Response Error ---',
+                correcto: false,
+                mensajeError: apiRes.errorMsg
+              });
+            }
+          }
+        } catch (fetchErr) {
+          console.error("fetch API failed: ", fetchErr);
+        }
+
+        // Catch fallback to calibrated local calculations
         const quoteResult = calculateSimulatedQuote(
           ins, 
           selectedVehiculo, 
@@ -145,24 +195,22 @@ export default function NewQuotePage({ onQuoteCompleted, onCancel }: NewQuotePag
           'Anual'
         );
 
-        // Save real WS debug log corresponding to this calculation!
+        // Document fallback
         logWSCall({
           aseguradora: ins.nombre,
-          endpoint: ins.slug === 'gnp' ? ins.credenciales.GNP_WS_URL : ins.slug === 'qualitas' ? ins.credenciales.QUALITAS_WS_URL : 'HTTPS://api.service.com',
-          status: quoteResult.status === 'exitoso' ? 200 : quoteResult.errorType === 'network' ? 403 : 400,
+          endpoint: ins.slug === 'gnp' ? ins.credenciales.GNP_WS_URL || '' : ins.slug === 'qualitas' ? ins.credenciales.QUALITAS_WS_URL || '' : ins.slug === 'chubb' ? ins.credenciales.CHUBB_WS_URL || '' : ins.slug === 'potosi' ? ins.credenciales.POTOSI_WS_URL || '' : 'HTTPS://api.service.com',
+          status: quoteResult.status === 'exitoso' ? 200 : 400,
           tipo: 'Cotizacion',
-          requestBody: ins.slug === 'gnp' 
-            ? `<xml><USUARIO>${ins.credenciales.GNP_USUARIO}</USUARIO><VEHICULO><ARMADORA>${selectedVehiculo.armadoraGnp || ''}</ARMADORA><CP>${cliente.codigoPostal}</CP></VEHICULO></xml>`
-            : `<soapenv:Envelope><soapenv:Body><obtenerNuevaEmision><NoNegocio>${ins.credenciales.QUALITAS_NO_NEGOCIO || ''}</NoNegocio><ClaveAmis>${selectedVehiculo.claveAmis || ''}</ClaveAmis></obtenerNuevaEmision></soapenv:Body></soapenv:Envelope>`,
-          responseBody: quoteResult.status === 'exitoso'
-            ? `<Envelope><Response><Codigo>SUCCESS</Codigo><Primas><PrimaNet>${quoteResult.primaNeta}</PrimaNet><PrimaTotal>${quoteResult.primaTotal}</PrimaTotal></Primas></Response></Envelope>`
-            : `<Envelope><Response><Codigo>ERROR_WS</Codigo><ErrorDetails>${quoteResult.errorMsg}</ErrorDetails></Response></Envelope>`,
+          requestBody: `<xml><USUARIO>${ins.slug === 'qualitas' ? ins.credenciales.QUALITAS_AGENTE : 'AGENTE_REF'}</USUARIO><VEHICULO><ARMADORA>${selectedVehiculo.marca}</ARMADORA><CP>${cliente.codigoPostal}</CP></VEHICULO></xml>`,
+          responseBody: `<Envelope><Response><Codigo>FALLBACK_CALIBRATION</Codigo><Primas><PrimaNet>${quoteResult.primaNeta}</PrimaNet><PrimaTotal>${quoteResult.primaTotal}</PrimaTotal></Primas></Response></Envelope>`,
           correcto: quoteResult.status === 'exitoso',
-          mensajeError: quoteResult.errorMsg,
+          mensajeError: quoteResult.errorMsg
         });
 
         return quoteResult;
       });
+
+      const results = await Promise.all(promises);
 
       // Generate clean new Folio COT-YYYYMMDD-XXXX
       const today = new Date();
@@ -175,7 +223,7 @@ export default function NewQuotePage({ onQuoteCompleted, onCancel }: NewQuotePag
       const newQuote: Cotizacion = {
         id: 'q-' + Date.now().toString(36),
         folio,
-        fechaCreacion: new Date().toISOString(),
+        fechaCreacion: today.toISOString(),
         cliente,
         vehiculo: selectedVehiculo,
         paqueteSeleccionado: 'Amplia',
@@ -195,7 +243,7 @@ export default function NewQuotePage({ onQuoteCompleted, onCancel }: NewQuotePag
       onQuoteCompleted(newQuote);
     } catch (e) {
       setLoading(false);
-      setFormError('Ocurrió un error inesperado al procesar las cotizaciones.');
+      setFormError('Ocurrió un error inesperado al procesar las cotizaciones en el servidor.');
     }
   };
 
@@ -215,7 +263,7 @@ export default function NewQuotePage({ onQuoteCompleted, onCancel }: NewQuotePag
           
           <div className="space-y-2">
             <h3 className="text-base font-black text-slate-900 tracking-tight">
-              Calculando Multicotización en Servidores
+              Consultando Multicotización con Aseguradoras
             </h3>
             <p className="text-xs text-slate-500 font-semibold font-mono animate-pulse bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
               {loadingStep}
@@ -285,7 +333,7 @@ export default function NewQuotePage({ onQuoteCompleted, onCancel }: NewQuotePag
 
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5 flex justify-between items-center">
-                    <span>RFC (Clave Fiscal) *</span>
+                    <span>RFC (Clave Fiscal)</span>
                     <button
                       type="button"
                       onClick={handleAutoGenerateRFC}
@@ -296,7 +344,6 @@ export default function NewQuotePage({ onQuoteCompleted, onCancel }: NewQuotePag
                   </label>
                   <input
                     type="text"
-                    required
                     maxLength={13}
                     value={cliente.rfc}
                     onChange={(e) => handleClienteChange('rfc', e.target.value.toUpperCase())}
@@ -385,11 +432,10 @@ export default function NewQuotePage({ onQuoteCompleted, onCancel }: NewQuotePag
 
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">
-                    Teléfono Celular *
+                    Teléfono Celular
                   </label>
                   <input
                     type="tel"
-                    required
                     value={cliente.telefono}
                     onChange={(e) => handleClienteChange('telefono', e.target.value)}
                     className="w-full text-xs font-semibold bg-slate-50 border border-slate-300 rounded-lg p-2.5 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white"
@@ -400,11 +446,10 @@ export default function NewQuotePage({ onQuoteCompleted, onCancel }: NewQuotePag
 
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">
-                    Correo Electrónico *
+                    Correo Electrónico
                   </label>
                   <input
                     type="email"
-                    required
                     value={cliente.correo}
                     onChange={(e) => handleClienteChange('correo', e.target.value)}
                     className="w-full text-xs font-semibold bg-slate-50 border border-slate-300 rounded-lg p-2.5 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white"

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import type { Cotizacion, QuoteStatus } from '../types';
+import type { Cotizacion, QuoteStatus, Cliente, Vehiculo } from '../types';
+import { INSURERS_SEED, calculateSimulatedQuote } from '../data/insurers';
+import { VEHICLE_CATALOG } from '../data/catalog';
 import { 
   Search, 
   Filter, 
@@ -25,13 +27,202 @@ export default function QuotesListPage({ onSelectQuote, onNavigateToNewQuote }: 
 
   const loadQuotes = () => {
     const saved = localStorage.getItem('movi_quotes');
+    
+    // Seed dynamically calculated quotes matching the cases
+    const seedQuotes: Cotizacion[] = [];
+    
+    const yarisObj = VEHICLE_CATALOG.find(v => v.id === 'toyota-yaris-2007');
+    const sportageObj = VEHICLE_CATALOG.find(v => v.id === 'kia-sportage-2018');
+    const jettaObj = VEHICLE_CATALOG.find(v => v.id === 'vw-jetta-2014');
+    const mazdaObj = VEHICLE_CATALOG.find(v => v.id === 'mazda-cx5-2019');
+    
+    const insurers = INSURERS_SEED;
+
+    // 1. Yaris 2007 (18 años)
+    if (yarisObj) {
+      const client: Cliente = {
+        id: 'c-yaris-18',
+        nombre: 'Juan Carlos Ruiz (Yaris - Joven)',
+        tipoPersona: 'Fisica',
+        rfc: 'RUJC080612HP9',
+        correo: 'juancarlos.ruiz@hotmail.com',
+        telefono: '3318901243',
+        codigoPostal: '47800',
+        edad: 18,
+        genero: 'Masculino'
+      };
+      const results = insurers.map(ins => calculateSimulatedQuote(ins, yarisObj, client, 'Amplia', 'Anual'));
+      seedQuotes.push({
+        id: 'seed-yaris-18',
+        folio: 'COT-20260610-YAR18',
+        fechaCreacion: '2026-06-10T15:00:13.000Z',
+        cliente: client,
+        vehiculo: yarisObj,
+        paqueteSeleccionado: 'Amplia',
+        formaPagoSeleccionada: 'Anual',
+        status: 'Cotizado',
+        userEmail: 'ccjimenez@jiro.com.mx',
+        resultados: results
+      });
+    }
+
+    // 2. Yaris 2007 (56 años)
+    if (yarisObj) {
+      const client: Cliente = {
+        id: 'c-yaris-56',
+        nombre: 'Alejandro Mendoza (Yaris - Adulto)',
+        tipoPersona: 'Fisica',
+        rfc: 'MEAL700215KR8',
+        correo: 'a.mendoza@potosi.com',
+        telefono: '4441559812',
+        codigoPostal: '47780',
+        edad: 56,
+        genero: 'Masculino'
+      };
+      const results = insurers.map(ins => calculateSimulatedQuote(ins, yarisObj, client, 'Amplia', 'Anual'));
+      seedQuotes.push({
+        id: 'seed-yaris-56',
+        folio: 'COT-20260610-YAR56',
+        fechaCreacion: '2026-06-10T11:42:00.000Z',
+        cliente: client,
+        vehiculo: yarisObj,
+        paqueteSeleccionado: 'Amplia',
+        formaPagoSeleccionada: 'Anual',
+        status: 'Cotizado',
+        userEmail: 'ccjimenez@jiro.com.mx',
+        resultados: results
+      });
+    }
+
+    // 3. Sportage 2018
+    if (sportageObj) {
+      const client: Cliente = {
+        id: 'c-sportage-25',
+        nombre: 'Diego Sebastián López (Sportage)',
+        tipoPersona: 'Fisica',
+        rfc: 'LODD010410HJ5',
+        correo: 'diego.lopez@gmail.com',
+        telefono: '4775128954',
+        codigoPostal: '37129',
+        edad: 25,
+        genero: 'Masculino'
+      };
+      const results = insurers.map(ins => calculateSimulatedQuote(ins, sportageObj, client, 'Amplia', 'Anual'));
+      seedQuotes.push({
+        id: 'seed-sportage-25',
+        folio: 'COT-20260421-SPO25',
+        fechaCreacion: '2026-04-21T12:00:00.000Z',
+        cliente: client,
+        vehiculo: sportageObj,
+        paqueteSeleccionado: 'Amplia',
+        formaPagoSeleccionada: 'Anual',
+        status: 'Cotizado',
+        userEmail: 'ccjimenez@jiro.com.mx',
+        resultados: results
+      });
+    }
+
+    // 4. Mazda CX-5 2019
+    if (mazdaObj) {
+      const client: Cliente = {
+        id: 'c-mazda-69',
+        nombre: 'María Teresa Jiménez (Mazda)',
+        tipoPersona: 'Fisica',
+        rfc: 'JIMA570912ML4',
+        correo: 'teresa.jimenez@outlook.com',
+        telefono: '4431897654',
+        codigoPostal: '58280',
+        edad: 69,
+        genero: 'Femenino'
+      };
+      const results = insurers.map(ins => calculateSimulatedQuote(ins, mazdaObj, client, 'Amplia', 'Anual'));
+      seedQuotes.push({
+        id: 'seed-mazda-69',
+        folio: 'COT-20260612-MAZ69',
+        fechaCreacion: '2026-06-12T09:48:19.000Z',
+        cliente: client,
+        vehiculo: mazdaObj,
+        paqueteSeleccionado: 'Amplia',
+        formaPagoSeleccionada: 'Anual',
+        status: 'Cotizado',
+        userEmail: 'ccjimenez@jiro.com.mx',
+        resultados: results
+      });
+    }
+
+    // 5. Jetta 2014
+    if (jettaObj) {
+      const client: Cliente = {
+        id: 'c-jetta-81',
+        nombre: 'Benjamín Silva (Jetta)',
+        tipoPersona: 'Fisica',
+        rfc: 'SIBM450520TS3',
+        correo: 'benjamin.silva@yahoo.com.mx',
+        telefono: '4441223344',
+        codigoPostal: '78395',
+        edad: 81,
+        genero: 'Masculino'
+      };
+      const results = insurers.map(ins => calculateSimulatedQuote(ins, jettaObj, client, 'Amplia', 'Anual'));
+      seedQuotes.push({
+        id: 'seed-jetta-81',
+        folio: 'COT-20260602-JET81',
+        fechaCreacion: '2026-06-02T10:15:00.000Z',
+        cliente: client,
+        vehiculo: jettaObj,
+        paqueteSeleccionado: 'Amplia',
+        formaPagoSeleccionada: 'Anual',
+        status: 'Cotizado',
+        userEmail: 'ccjimenez@jiro.com.mx',
+        resultados: results
+      });
+    }
+
+    let parsedQuotes: Cotizacion[] = [];
     if (saved) {
       try {
-        setQuotes(JSON.parse(saved));
+        parsedQuotes = JSON.parse(saved);
       } catch {
-        setQuotes([]);
+        parsedQuotes = [];
       }
     }
+
+    // Check if any seed quote is missing from parsed, if so add it
+    let modified = false;
+    seedQuotes.forEach(seedQ => {
+      const exists = parsedQuotes.some(q => q.id === seedQ.id);
+      if (!exists) {
+        parsedQuotes.push(seedQ);
+        modified = true;
+      }
+    });
+
+    // Also update any existing seed quotes to match fresh calculations
+    const updatedQuotes = parsedQuotes.map(q => {
+      if (q.id && q.id.startsWith('seed-')) {
+        const freshResults = insurers.map(ins => 
+          calculateSimulatedQuote(ins, q.vehiculo, q.cliente, q.paqueteSeleccionado, q.formaPagoSeleccionada)
+        );
+        
+        const oldSum = q.resultados?.reduce((acc, r) => acc + r.primaTotal, 0) || 0;
+        const newSum = freshResults.reduce((acc, r) => acc + r.primaTotal, 0);
+
+        if (Math.abs(oldSum - newSum) > 0.01 || q.resultados?.length !== freshResults.length) {
+          modified = true;
+          return {
+            ...q,
+            resultados: freshResults
+          };
+        }
+      }
+      return q;
+    });
+
+    if (modified || !saved) {
+      localStorage.setItem('movi_quotes', JSON.stringify(updatedQuotes));
+    }
+
+    setQuotes(updatedQuotes);
   };
 
   useEffect(() => {

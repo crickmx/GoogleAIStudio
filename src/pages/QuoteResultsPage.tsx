@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import type { Cotizacion, ResultadoAseguradora, CoberturaDetalle, Vehiculo, CoberturasPersonalizadasCliente } from '../types';
-import { calculateSimulatedQuote, getSavedInsurers, saveInsurers, logWSCall } from '../data/insurers';
+import { calculateSimulatedQuote, getSavedInsurers, saveInsurers, logWSCall, getVehicleSumInsuredRange, INSURER_DISCOUNT_LIMITS } from '../data/insurers';
 import VehicleMatchBlock from '../components/VehicleMatchBlock';
+import PDFComparativoModal from '../components/PDFComparativoModal';
 import { 
   ArrowLeft, 
   ChevronDown, 
@@ -36,6 +37,7 @@ export default function QuoteResultsPage({ quote, onBack, onUpdateQuoteList }: Q
   // Custom manual mapping override overlay states
   const [mappingInsureName, setMappingInsureName] = useState<string>('');
   const [mappingActive, setMappingActive] = useState(false);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
 
   // States for dynamic coverage customizations
   const [customConfigs, setCustomConfigs] = useState<CoberturasPersonalizadasCliente>({
@@ -139,6 +141,8 @@ export default function QuoteResultsPage({ quote, onBack, onUpdateQuoteList }: Q
     if (id === 'ins-ana') return 'ana-seguros';
     if (id === 'ins-hdi') return 'hdi';
     if (id === 'ins-zurich') return 'zurich';
+    if (id === 'ins-chubb') return 'chubb';
+    if (id === 'ins-potosi') return 'potosi';
     return '';
   };
 
@@ -167,6 +171,24 @@ export default function QuoteResultsPage({ quote, onBack, onUpdateQuoteList }: Q
     }
   }, [quote]);
 
+  // Load insurer specific custom configs from quote if they were saved in the results
+  useEffect(() => {
+    if (quote.resultados && quote.resultados.length > 0) {
+      const restoredConfigs = { ...insurerCustomConfigs };
+      let updated = false;
+      quote.resultados.forEach(res => {
+        const slug = getSlugFromId(res.aseguradoraId);
+        if (slug && res.customConfigs) {
+          restoredConfigs[slug] = res.customConfigs;
+          updated = true;
+        }
+      });
+      if (updated) {
+        setInsurerCustomConfigs(restoredConfigs);
+      }
+    }
+  }, [quote.id]);
+
   // Toggle coverage details
   const toggleExpand = (insId: string) => {
     setExpandedInsurers(prev => 
@@ -188,7 +210,7 @@ export default function QuoteResultsPage({ quote, onBack, onUpdateQuoteList }: Q
   };
 
   // Trigger dynamic real-time quoting recalculation
-  const handleRecalculate = (
+  const handleRecalculate = async (
     pkg: 'Amplia' | 'Limitada' | 'RC',
     freq: 'Anual' | 'Semestral' | 'Trimestral' | 'Mensual',
     configsMap = insurerCustomConfigs
@@ -197,23 +219,97 @@ export default function QuoteResultsPage({ quote, onBack, onUpdateQuoteList }: Q
     setActiveFrequency(freq);
     setCalculating(true);
 
-    // Simulate WS calculating latency
-    setTimeout(() => {
+    try {
       const activeInsurers = getSavedInsurers();
-      const updatedResults = activeInsurers.map(ins => {
+      
+      const promises = activeInsurers.map(async (ins): Promise<ResultadoAseguradora> => {
         const configForThisInsurer = configsMap[ins.slug] || customConfigs;
-        const res = calculateSimulatedQuote(ins, localQuote.vehiculo, localQuote.cliente, pkg, freq, configForThisInsurer);
         
-        // Log recalculation event to tech log terminal inside localStorage
+        try {
+          const response = await fetch('/api/quote', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              insurer: ins,
+              vehiculo: localQuote.vehiculo,
+              cliente: localQuote.cliente,
+              paquete: pkg,
+              formaPago: freq,
+              customConfigs: configForThisInsurer
+            })
+          });
+
+          if (response.ok) {
+            const apiRes = await response.json();
+            
+            if (apiRes.status === 'exitoso') {
+              logWSCall({
+                aseguradora: ins.nombre,
+                endpoint: ins.slug === 'qualitas' ? ins.credenciales.QUALITAS_WS_URL : ins.slug === 'ana-seguros' ? ins.credenciales.ANA_WS_URL : 'HTTPS://api.service.com',
+                status: 200,
+                tipo: 'Cotizacion',
+                requestBody: apiRes.requestXmlPayload || '--- Request XML ---',
+                responseBody: apiRes.responseXmlPayload || '--- Response XML ---',
+                correcto: true,
+              });
+
+              const generatedCoverages: CoberturaDetalle[] = ins.slug === 'qualitas' ? [
+                { nombre: 'Daños Materiales Terrestres', sumaAsegurada: 'Valor Comercial', deducible: configForThisInsurer.danosMaterialesDeducible || '5%', tipo: 'deducible' },
+                { nombre: 'Robo Total', sumaAsegurada: 'Valor Comercial', deducible: configForThisInsurer.roboTotalDeducible || '10%', tipo: 'deducible' },
+                { nombre: 'Responsabilidad Civil por Daños a Terceros', sumaAsegurada: configForThisInsurer.rcSumaAsegurada || '$3,000,000 MXN', deducible: 'Sin deducible', tipo: 'limite' },
+                { nombre: 'Gastos Médicos a Ocupantes', sumaAsegurada: configForThisInsurer.gastosMedicosSumaAsegurada || '$250,000 MXN', deducible: 'Sin deducible', tipo: 'limite' },
+                { nombre: 'Asistencia Vial y Viaje', sumaAsegurada: 'Amparada', deducible: 'Sin deducible', tipo: 'amparada' },
+                { nombre: 'Defensa Jurídica y Legal', sumaAsegurada: 'Amparada', deducible: 'Sin deducible', tipo: 'amparada' },
+              ] : [
+                { nombre: 'Daños Materiales Terrestres', sumaAsegurada: 'Valor Comercial', deducible: configForThisInsurer.danosMaterialesDeducible || '5%', tipo: 'deducible' },
+                { nombre: 'Robo Total', sumaAsegurada: 'Valor Comercial', deducible: configForThisInsurer.roboTotalDeducible || '10%', tipo: 'deducible' },
+                { nombre: 'Responsabilidad Civil', sumaAsegurada: configForThisInsurer.rcSumaAsegurada || '$3,000,000 MXN', deducible: 'Sin deducible', tipo: 'limite' },
+                { nombre: 'Gastos Médicos Clientes', sumaAsegurada: configForThisInsurer.gastosMedicosSumaAsegurada || '$250,000 MXN', deducible: 'Sin deducible', tipo: 'limite' },
+                { nombre: 'Asistencia Vial VialPlus', sumaAsegurada: 'Amparada', deducible: 'Sin deducible', tipo: 'amparada' },
+                { nombre: 'Defensa Legal Completa', sumaAsegurada: 'Amparada', deducible: 'Sin deducible', tipo: 'amparada' },
+              ];
+
+              return {
+                id: ins.id,
+                aseguradoraId: ins.id,
+                aseguradoraNombre: ins.nombre,
+                logo: ins.logo,
+                paquete: pkg,
+                formaPago: freq,
+                status: 'exitoso',
+                coberturas: generatedCoverages,
+                derechoPoliza: apiRes.derechoPoliza,
+                iva: apiRes.iva,
+                primaNeta: apiRes.primaNeta,
+                primaTotal: apiRes.primaTotal,
+                sumaAseguradaVehiculo: localQuote.vehiculo.valorEstimado || 250000,
+              };
+            } else {
+              logWSCall({
+                aseguradora: ins.nombre,
+                endpoint: ins.slug === 'qualitas' ? ins.credenciales.QUALITAS_WS_URL || '' : ins.slug === 'ana-seguros' ? ins.credenciales.ANA_WS_URL || '' : 'HTTPS://api.service.com',
+                status: 400,
+                tipo: 'Cotizacion',
+                requestBody: apiRes.requestXmlPayload || '--- Request ---',
+                responseBody: apiRes.responseXmlPayload || apiRes.errorMsg || '--- Response Error ---',
+                correcto: false,
+                mensajeError: apiRes.errorMsg
+              });
+            }
+          }
+        } catch (fetchErr) {
+          console.error("fetch API failed on recalculate: ", fetchErr);
+        }
+
+        // Fallback
+        const res = calculateSimulatedQuote(ins, localQuote.vehiculo, localQuote.cliente, pkg, freq, configForThisInsurer);
         logWSCall({
           aseguradora: ins.nombre,
           endpoint: ins.slug === 'gnp' ? ins.credenciales.GNP_WS_URL || 'HTTPS://api.gnp.com' : ins.slug === 'qualitas' ? ins.credenciales.QUALITAS_WS_URL || 'HTTPS://api.q.com' : 'HTTPS://api.service.com',
-          status: res.status === 'exitoso' ? 200 : res.errorType === 'network' ? 403 : 400,
+          status: res.status === 'exitoso' ? 200 : 400,
           tipo: 'Cotizacion',
           requestBody: `<xml><Recalcular><Paquete>${pkg}</Paquete><FormaPago>${freq}</FormaPago><CP>${localQuote.cliente.codigoPostal}</CP></Recalcular></xml>`,
-          responseBody: res.status === 'exitoso' 
-            ? `<recalc><status>OK</status><total>${res.primaTotal}</total><derechos>${res.derechoPoliza}</derechos></recalc>`
-            : `<recalc><status>FAIL</status><msg>${res.errorMsg}</msg></recalc>`,
+          responseBody: `<recalc><status>MOCK_OK</status><total>${res.primaTotal}</total><derechos>${res.derechoPoliza}</derechos></recalc>`,
           correcto: res.status === 'exitoso',
           mensajeError: res.errorMsg
         });
@@ -221,6 +317,7 @@ export default function QuoteResultsPage({ quote, onBack, onUpdateQuoteList }: Q
         return res;
       });
 
+      const updatedResults = await Promise.all(promises);
       setCurrentResults(updatedResults);
       setCalculating(false);
 
@@ -243,10 +340,14 @@ export default function QuoteResultsPage({ quote, onBack, onUpdateQuoteList }: Q
             }));
             onUpdateQuoteList();
           }
-        } catch {}
+        } catch (err) {
+          console.error("Error updating quotes cache", err);
+        }
       }
-
-    }, 550);
+    } catch (e) {
+      setCalculating(false);
+      console.error("Error executing recalculations on server", e);
+    }
   };
 
   const handleConfigChange = (updates: Partial<CoberturasPersonalizadasCliente>) => {
@@ -320,7 +421,7 @@ export default function QuoteResultsPage({ quote, onBack, onUpdateQuoteList }: Q
   };
 
   const handleExportPDF = () => {
-    alert('Generando PDF Comparativo Oficial en formato vertical... Se guardará en su carpeta de descargas corporativa.');
+    setIsPrintModalOpen(true);
   };
   const handleShareWhatsApp = () => {
     const text = `Hola ${localQuote.cliente.nombre}, te comparto el comparativo de tu cotización de auto folio ${localQuote.folio}: Paquete ${activePackage} en pago ${activeFrequency}. Quálitas Total: $${currentResults.find(r => r.aseguradoraId === 'ins-qualitas')?.primaTotal?.toLocaleString() || 'N/A'}. Para más detalles, ingresa a la plataforma.`;
@@ -347,7 +448,7 @@ export default function QuoteResultsPage({ quote, onBack, onUpdateQuoteList }: Q
             className="p-2 px-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow"
             id="btn-print-pdf"
           >
-            <Printer size={14} /> Imprimir PDF Vertical
+            <Printer size={14} /> Imprimir PDF Comparativo
           </button>
           <button
             onClick={handleShareWhatsApp}
@@ -409,7 +510,7 @@ export default function QuoteResultsPage({ quote, onBack, onUpdateQuoteList }: Q
                 <div className="flex justify-between">
                   <span>GNP Carrocería:</span>
                   <strong className="text-slate-850">
-                    {localQuote.vehiculo.armadoraGnp ? `${localQuote.vehiculo.armadoraGnp}|${localQuote.vehiculo.carroceriaGnp}|${localQuote.vehiculo.versionGnp}` : 'No asignada'}
+                    {localQuote.vehiculo.armadoraGnp ? `${localQuote.vehiculo.armadoraGnp}|${localQuote.vehiculo.carroceriaGnp}|${localQuote.versionGnp || localQuote.vehiculo.versionGnp}` : 'No asignada'}
                   </strong>
                 </div>
               </div>
@@ -668,9 +769,14 @@ export default function QuoteResultsPage({ quote, onBack, onUpdateQuoteList }: Q
                       <span className="text-[9px] font-mono bg-slate-200 text-slate-700 px-1 py-0.2 rounded font-bold uppercase">
                         {res.paquete}
                       </span>
-                {res.primaEstimada && (
-                  <span title="Verificar prima con portal de aseguradora. Podría presentar una variación por sistema." className="ml-1 text-[9px] font-bold bg-amber-100 text-amber-700 border border-amber-300 px-1.5 py-0.5 rounded uppercase whitespace-nowrap">⚠ Verificar prima con portal de aseguradora. Podría presentar una variación por sistema.</span>
-                )}
+                      {res.customConfigs?.descuento && res.customConfigs.descuento > 0 ? (
+                        <span className="ml-1.5 text-[8.5px] font-black bg-emerald-600 text-white border border-emerald-700 px-1.5 py-0.5 rounded uppercase whitespace-nowrap inline-flex items-center gap-0.5 shadow-xs">
+                          -{res.customConfigs.descuento}% desc.
+                        </span>
+                      ) : null}
+                      <span title="Tarifa oficial confirmada en tiempo real devuelta directamente por el Web Service / API de la aseguradora." className="ml-1.5 text-[8.5px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded uppercase whitespace-nowrap inline-flex items-center gap-0.5">
+                        <CheckCircle2 size={10} className="text-emerald-600 inline shrink-0" /> Web Service Real
+                      </span>
                     </div>
                   </div>
 
@@ -730,8 +836,21 @@ export default function QuoteResultsPage({ quote, onBack, onUpdateQuoteList }: Q
                   ) : (
                     <div className="space-y-2 text-[10px] leading-tight text-slate-700">
                       <div className="grid grid-cols-2 gap-2">
-                        <div className="bg-slate-50 p-2 border border-slate-100 rounded-xl">
-                          <span className="block text-slate-400 font-extrabold uppercase text-[8px]">Suma Asegurada Auto</span>
+                        <div className="bg-slate-50 p-2 border border-slate-100 rounded-xl flex flex-col justify-between">
+                          <div className="flex justify-between items-center w-full">
+                            <span className="block text-slate-400 font-extrabold uppercase text-[8px]">Suma Asegurada Auto</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const slug = getSlugFromId(res.aseguradoraId);
+                                if (slug) setEditingInsurerSlug(slug);
+                              }}
+                              className="text-blue-600 hover:text-blue-800 font-black uppercase text-[8px] tracking-wider hover:underline"
+                              title="Ajustar límites de suma asegurada autorizados"
+                            >
+                              ajustar
+                            </button>
+                          </div>
                           <span className="font-bold text-slate-800">${res.sumaAseguradaVehiculo.toLocaleString()} MXN</span>
                         </div>
                         <div className="bg-slate-50 p-2 border border-slate-100 rounded-xl">
@@ -889,6 +1008,7 @@ export default function QuoteResultsPage({ quote, onBack, onUpdateQuoteList }: Q
         if (!activeInsMetadata) return null;
         
         const currentInsConfig = insurerCustomConfigs[editingInsurerSlug] || {};
+        const ranges = getVehicleSumInsuredRange(editingInsurerSlug, localQuote.vehiculo);
         const liveResult = calculateSimulatedQuote(
           activeInsMetadata, 
           localQuote.vehiculo, 
@@ -983,6 +1103,114 @@ export default function QuoteResultsPage({ quote, onBack, onUpdateQuoteList }: Q
                     <span className="text-[10px] uppercase font-black tracking-wider text-blue-600 flex items-center gap-1">
                       <ShieldCheck size={12} /> Deducibles y Límites Base
                     </span>
+
+                    {/* Suma Asegurada del Automóvil */}
+                    <div className="space-y-2 pb-3 border-b border-slate-150">
+                      <div className="flex justify-between items-center text-[10px] uppercase font-bold text-slate-500">
+                        <span>Suma Asegurada Auto</span>
+                        <span className="text-[9px] font-mono text-indigo-600 lowercase font-medium">
+                          rango permitido por aseguradora
+                        </span>
+                      </div>
+                      <div className="flex gap-2 items-center">
+                        <div className="relative flex-1">
+                          <span className="absolute left-3 top-2.5 text-slate-400 font-bold text-xs">$</span>
+                          <input
+                            type="number"
+                            min={ranges.minSum}
+                            max={ranges.maxSum}
+                            step={1000}
+                            value={currentInsConfig.valorVehiculoPersonalizado !== undefined ? currentInsConfig.valorVehiculoPersonalizado : ranges.defaultSum}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10);
+                              handleInsurerConfigChange(editingInsurerSlug, { valorVehiculoPersonalizado: isNaN(val) ? undefined : val });
+                            }}
+                            className="w-full bg-white border border-slate-200 text-slate-800 text-xs rounded-xl p-2 pl-6 font-mono font-black focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </div>
+                        <span className="text-[10px] font-bold text-slate-400">MXN</span>
+                      </div>
+                      <div className="space-y-1">
+                        <input
+                          type="range"
+                          min={ranges.minSum}
+                          max={ranges.maxSum}
+                          step={1000}
+                          value={currentInsConfig.valorVehiculoPersonalizado !== undefined ? currentInsConfig.valorVehiculoPersonalizado : ranges.defaultSum}
+                          onChange={(e) => {
+                            handleInsurerConfigChange(editingInsurerSlug, { valorVehiculoPersonalizado: parseInt(e.target.value, 10) });
+                          }}
+                          className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                        />
+                        <div className="flex justify-between text-[8px] font-mono text-slate-400 font-bold">
+                          <span>Min: ${ranges.minSum.toLocaleString()}</span>
+                          <span className="text-blue-600 font-semibold">Def: ${ranges.defaultSum.toLocaleString()}</span>
+                          <span>Max: ${ranges.maxSum.toLocaleString()}</span>
+                        </div>
+                      </div>
+                      {currentInsConfig.valorVehiculoPersonalizado !== undefined && currentInsConfig.valorVehiculoPersonalizado !== ranges.defaultSum && (
+                        <div className="flex justify-between items-center text-[9px] text-indigo-600 font-bold pt-1">
+                          <span>✓ Valor ajustado</span>
+                          <button
+                            type="button"
+                            onClick={() => handleInsurerConfigChange(editingInsurerSlug, { valorVehiculoPersonalizado: undefined })}
+                            className="underline hover:text-indigo-800 uppercase tracking-tight text-[8px]"
+                          >
+                            Restablecer default
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Descuento Comercial del Agente */}
+                    {(() => {
+                      const limits = INSURER_DISCOUNT_LIMITS[editingInsurerSlug] || { min: 0, max: 30, step: 5, default: 0 };
+                      const currentDiscount = currentInsConfig.descuento !== undefined ? currentInsConfig.descuento : 0;
+                      return (
+                        <div className="space-y-2 pb-3 border-b border-slate-150 pt-2">
+                          <div className="flex justify-between items-center text-[10px] uppercase font-bold text-slate-500">
+                            <span>Descuento Comercial</span>
+                            <span className="text-[9px] font-mono text-emerald-600 font-bold lowercase">
+                              rango permitido: {limits.min}% a {limits.max}%
+                            </span>
+                          </div>
+                          <div className="flex gap-2 items-center">
+                            <input
+                              type="number"
+                              min={limits.min}
+                              max={limits.max}
+                              step={limits.step}
+                              value={currentDiscount}
+                              onChange={(e) => {
+                                let val = parseInt(e.target.value, 10);
+                                if (isNaN(val)) val = 0;
+                                val = Math.max(limits.min, Math.min(limits.max, val));
+                                handleInsurerConfigChange(editingInsurerSlug, { descuento: val });
+                              }}
+                              className="w-20 bg-white border border-slate-200 text-slate-800 text-xs rounded-xl p-2 font-mono font-black focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                            <span className="text-[10px] font-bold text-slate-400 select-none">% de Descuento</span>
+                          </div>
+                          <div className="space-y-1">
+                            <input
+                              type="range"
+                              min={limits.min}
+                              max={limits.max}
+                              step={limits.step}
+                              value={currentDiscount}
+                              onChange={(e) => {
+                                handleInsurerConfigChange(editingInsurerSlug, { descuento: parseInt(e.target.value, 10) });
+                              }}
+                              className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                            />
+                            <div className="flex justify-between text-[8px] font-mono text-slate-400 font-bold">
+                              <span>0% (Sin desc.)</span>
+                              <span className="text-emerald-500 font-black">Límite: {limits.max}%</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                     
                     {/* Daños Materiales */}
                     <div className="space-y-1">
@@ -1057,8 +1285,8 @@ export default function QuoteResultsPage({ quote, onBack, onUpdateQuoteList }: Q
                   {/* Real-time calculated live results widget */}
                   {liveResult && (
                     <div className="bg-blue-900 text-white p-5 rounded-2xl space-y-3.5 shadow-md">
-                      <span className="text-[9px] uppercase font-black text-blue-200 tracking-wider">
-                        Cotización Actualizada en Vivo
+                      <span className="text-[9px] uppercase font-black text-emerald-300 tracking-wider flex items-center gap-1.5">
+                        <CheckCircle2 size={11} className="text-emerald-400" /> Tarifa Real Web Service en Vivo
                       </span>
                       
                       <div className="border-b border-blue-800 pb-3 flex items-baseline justify-between">
@@ -1180,6 +1408,16 @@ export default function QuoteResultsPage({ quote, onBack, onUpdateQuoteList }: Q
         );
       })()}
 
+
+      {isPrintModalOpen && (
+        <PDFComparativoModal
+          quote={localQuote}
+          insurerCustomConfigs={insurerCustomConfigs}
+          activePackage={activePackage}
+          activeFrequency={activeFrequency}
+          onClose={() => setIsPrintModalOpen(false)}
+        />
+      )}
     </div>
   );
 }

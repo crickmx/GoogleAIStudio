@@ -2,6 +2,62 @@ import type { Vehiculo } from '../types';
 
 // Precise pre-configured, user-tested vehicles to ensure compatibility with PDFs and existing quote flows
 const STATIC_VEHICLES: Vehiculo[] = [
+  // Kia Sportage 2018 (To match official user PDFs)
+  {
+    id: 'kia-sportage-2018',
+    marca: 'Kia',
+    modelo: 'Sportage',
+    anio: 2018,
+    version: 'SXL 2.4L AWD Aut 5P (Piel/QC)',
+    descripcionCompleta: 'KIA SPORTAGE SXL 2.4 AWD AUT 5P 5OCUP 2018',
+    claveAmis: '0520310',
+    armadoraGnp: 'KI',
+    carroceriaGnp: '05',
+    versionGnp: '12',
+    valorReferencia: 254650,
+  },
+  // Toyota Yaris 2007 (Precisely matching user PDFs)
+  {
+    id: 'toyota-yaris-2007',
+    marca: 'Toyota',
+    modelo: 'Yaris',
+    anio: 2007,
+    version: 'Core AC Automática 4Ptas',
+    descripcionCompleta: 'TOYOTA YARIS CORE AC AUTOMATICA 4PTAS',
+    claveAmis: '0810010',
+    armadoraGnp: 'TO',
+    carroceriaGnp: '01',
+    versionGnp: '05',
+    valorReferencia: 72619,
+  },
+  // VW Jetta 2014 (Precisely matching Jetta Clásico/A4 2014 PDFs)
+  {
+    id: 'vw-jetta-2014',
+    marca: 'Volkswagen',
+    modelo: 'Jetta',
+    anio: 2014,
+    version: 'Clásico CL Team L4 2.0L Std',
+    descripcionCompleta: 'VOLKSWAGEN JETTA CLASICO CL TEAM L4 2.0L STD',
+    claveAmis: '0912101',
+    armadoraGnp: 'VW',
+    carroceriaGnp: '01',
+    versionGnp: '02',
+    valorReferencia: 124000,
+  },
+  // VW Amarok 2020 (Precisely matching Quálitas Policy PDF)
+  {
+    id: 'vw-amarok-2020',
+    marca: 'Volkswagen',
+    modelo: 'Amarok',
+    anio: 2020,
+    version: 'Amarok Highline PK 4P L4 2.0L TDI Aut',
+    descripcionCompleta: 'VW AMAROK HIGHLINE PK 4P L4 2.0L TDI 4MOTION 1.5TO AUT',
+    claveAmis: '0912122',
+    armadoraGnp: 'VW',
+    carroceriaGnp: '04',
+    versionGnp: '05',
+    valorReferencia: 677350,
+  },
   // Nissan Versa
   {
     id: 'niss-versa-1',
@@ -421,6 +477,19 @@ const STATIC_VEHICLES: Vehiculo[] = [
     carroceriaGnp: '02',
     versionGnp: '05',
     valorReferencia: 347634,
+  },
+  {
+    id: 'mazda-cx5-2019',
+    marca: 'Mazda',
+    modelo: 'CX-5',
+    anio: 2019,
+    version: 'S Grand Touring 2.5L Auto',
+    descripcionCompleta: 'MAZDA CX5 S GRAND TOURING 2.5I VP QC AUTOMATICA 5P 2019',
+    claveAmis: '0615201',
+    armadoraGnp: 'MA',
+    carroceriaGnp: '05',
+    versionGnp: '02',
+    valorReferencia: 324000,
   },
 
   // FORD
