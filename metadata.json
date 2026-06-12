@@ -1,0 +1,6 @@
+{
+  "name": "MOVI Multicotizador",
+  "description": "Plataforma integrada de multicotización de seguros de autos para agentes de seguros. Soporte para Quálitas, GNP, ANA y El Potosí.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
